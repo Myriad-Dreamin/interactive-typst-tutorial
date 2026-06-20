@@ -7,6 +7,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      TINYMIST_DIR: ${{ github.workspace }}/../../rust/tinymist-wasm
     steps:
       - uses: actions/checkout@v4
 
@@ -17,19 +19,53 @@ jobs:
 
       - name: Checkout Tinymist web fork
         run: |
-          git clone --branch tinymist-wasm --depth 1 https://github.com/ParaN3xus/tinymist.git ../../rust/tinymist-wasm
-          git -C ../../rust/tinymist-wasm apply "$GITHUB_WORKSPACE/patches/tinymist-web-export.patch"
+          mkdir -p "$(dirname "$TINYMIST_DIR")"
+          git clone --branch tinymist-wasm --depth 1 https://github.com/ParaN3xus/tinymist.git "$TINYMIST_DIR"
+          git -C "$TINYMIST_DIR" apply "$GITHUB_WORKSPACE/patches/tinymist-web-export.patch"
+
+      - name: Resolve Tinymist cache key
+        id: tinymist
+        run: |
+          tinymist_sha="$(git -C "$TINYMIST_DIR" rev-parse HEAD)"
+          echo "sha=$tinymist_sha" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Rust and Tinymist build outputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/wasm-pack
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ${{ env.TINYMIST_DIR }}/target
+            ${{ env.TINYMIST_DIR }}/crates/tinymist/pkg
+          key: ${{ runner.os }}-tinymist-${{ steps.tinymist.outputs.sha }}-${{ hashFiles('patches/tinymist-web-export.patch') }}
+          restore-keys: |
+            ${{ runner.os }}-tinymist-${{ steps.tinymist.outputs.sha }}-
+            ${{ runner.os }}-tinymist-
+
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.13.1 --locked
+        run: |
+          if ! command -v wasm-pack >/dev/null 2>&1 || [ "$(wasm-pack --version)" != "wasm-pack 0.13.1" ]; then
+            cargo install wasm-pack --version 0.13.1 --locked
+          fi
 
       - name: Build Tinymist web package
-        run: npm --prefix ../../rust/tinymist-wasm/crates/tinymist run build
+        run: npm --prefix "$TINYMIST_DIR/crates/tinymist" run build
 
       - run: npm ci
+
+      - name: Cache tutorial fonts
+        uses: actions/cache@v4
+        with:
+          path: public/assets/fonts
+          key: ${{ runner.os }}-tutorial-fonts-${{ hashFiles('scripts/font-manifest.mjs', 'scripts/install-fonts.mjs') }}
+          restore-keys: |
+            ${{ runner.os }}-tutorial-fonts-
+
       - run: npm run assets:fonts
       - run: npm run build
 
