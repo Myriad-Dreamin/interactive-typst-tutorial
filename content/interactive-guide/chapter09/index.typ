@@ -1,0 +1,7 @@
+#include "write-math-document.typ"
+#include "component-library.typ"
+#include "plugin-library.typ"
+#include "call-externals.typ"
+#include "book-template.typ"
+#include "cv-template.typ"
+#include "ieee-template.typ"

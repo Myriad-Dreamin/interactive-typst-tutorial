@@ -1,0 +1,179 @@
+diff --git a/crates/tinymist/package.json b/crates/tinymist/package.json
+index 837dfe4..29a7eb1 100644
+--- a/crates/tinymist/package.json
++++ b/crates/tinymist/package.json
+@@ -19,9 +19,9 @@
+     "pkg/tinymist.d.ts"
+   ],
+   "scripts": {
+-    "build:dev": "wasm-pack build --target web --dev -- --no-default-features --features web,preview,no-content-hint",
+-    "build:node": "wasm-pack build --target nodejs -- --no-default-features --features web,preview,no-content-hint",
+-    "build": "wasm-pack build --target web -- --no-default-features --features web,preview,no-content-hint",
++    "build:dev": "wasm-pack build --target web --dev -- --no-default-features --features web,preview,export,no-content-hint",
++    "build:node": "wasm-pack build --target nodejs -- --no-default-features --features web,preview,export,no-content-hint",
++    "build": "wasm-pack build --target web -- --no-default-features --features web,preview,export,no-content-hint",
+     "watch": "cargo watch -i .gitignore -i \"pkg/*\" -s \"yarn build\"",
+     "publish:dry": "npm publish --dry-run",
+     "publish:lib": "npm publish || exit 0",
+@@ -31,4 +31,4 @@
+   "devDependencies": {
+     "turbo": "^2.3.3"
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/crates/tinymist/src/task/export.rs b/crates/tinymist/src/task/export.rs
+index b99b61c..126bca6 100644
+--- a/crates/tinymist/src/task/export.rs
++++ b/crates/tinymist/src/task/export.rs
+@@ -11,6 +11,7 @@ use sync_ls::{internal_error, just_future};
+ use tinymist_project::LspWorld;
+ use tinymist_query::{OnExportRequest, OnExportResponse, PagedExportResponse, GLOBAL_STATS};
+ use tinymist_std::error::prelude::*;
++#[cfg(feature = "system")]
+ use tinymist_std::fs::paths::write_atomic;
+ use tinymist_std::path::PathClean;
+ use tinymist_std::typst::TypstDocument;
+@@ -29,8 +30,8 @@ use rayon::Scope;
+ use super::SyncTaskFactory;
+ use crate::lsp::query::QueryFuture;
+ use crate::project::{
+-    update_lock, ApplyProjectTask, CompiledArtifact, DevEvent, DevExportEvent, EntryReader,
+-    ExportHtmlTask, ExportPdfTask, ExportTask as ProjectExportTask, ExportTeXTask, ExportTextTask,
++    ApplyProjectTask, CompiledArtifact, DevEvent, DevExportEvent, EntryReader, ExportHtmlTask,
++    ExportPdfTask, ExportTask as ProjectExportTask, ExportTeXTask, ExportTextTask,
+     LspCompiledArtifact, LspComputeGraph, ProjectClient, ProjectTask, TaskWhen,
+     PROJECT_ROUTE_USER_ACTION_PRIORITY,
+ };
+@@ -50,9 +51,10 @@ impl ServerState {
+         let entry = self.entry_resolver().resolve(Some(path.as_path().into()));
+         let lock_dir = self.entry_resolver().resolve_lock(&entry);
+ 
++        #[cfg(feature = "system")]
+         let update_dep = lock_dir.clone().map(|lock_dir| {
+             |snap: LspComputeGraph| async move {
+-                let mut updater = update_lock(lock_dir.clone());
++                let mut updater = crate::project::update_lock(lock_dir.clone());
+                 let world = snap.world();
+                 // todo: rootless.
+                 let root_dir = world.entry_state().root()?;
+@@ -93,8 +95,11 @@ impl ServerState {
+                     .map_err(internal_error)?
+             };
+ 
+-            if let Some(update_dep) = update_dep {
+-                tokio::spawn(update_dep(snap));
++            #[cfg(feature = "system")]
++            {
++                if let Some(update_dep) = update_dep {
++                    tokio::spawn(update_dep(snap));
++                }
+             }
+ 
+             // Only open the first page if multiple pages are exported
+@@ -313,7 +318,10 @@ impl ExportTask {
+ 
+         let CompiledArtifact { graph, .. } = &artifact;
+ 
++        #[cfg(feature = "system")]
+         let write_to = Self::prepare_output_path(&task, graph)?;
++        #[cfg(not(feature = "system"))]
++        let write_to: Option<PathBuf> = None;
+ 
+         let artifact = Self::do_export_bytes(task, artifact, 0).await?;
+ 
+@@ -384,6 +392,7 @@ impl ExportTask {
+             }
+         }
+ 
++        #[cfg(feature = "system")]
+         let _: Option<()> = lock_dir.and_then(|lock_dir| {
+             let mut updater = crate::project::update_lock(lock_dir.clone());
+             let root = graph.world().entry_state().root()?;
+@@ -412,10 +421,16 @@ impl ExportTask {
+                     data: None,
+                 };
+ 
++                #[cfg(not(feature = "system"))]
++                bail!("exporting to files is not supported in web builds");
++
++                #[cfg(feature = "system")]
++                {
+                 let to = write_to.clone();
+                 tokio::task::spawn_blocking(move || write_atomic(to, data))
+                     .await
+                     .context_ut("failed to export")??;
++                }
+ 
+                 res
+             }
+@@ -428,6 +443,7 @@ impl ExportTask {
+                 }
+ 
+                 let mut res_items = Vec::new();
++                #[cfg(feature = "system")]
+                 let mut write_futures = Vec::new();
+                 for (page_idx, bytes) in items {
+                     let to = if can_handle_multiple {
+@@ -447,14 +463,23 @@ impl ExportTask {
+                         data: None,
+                     });
+ 
++                    #[cfg(not(feature = "system"))]
++                    bail!("exporting to files is not supported in web builds");
++
++                    #[cfg(feature = "system")]
++                    {
+                     let fut = tokio::task::spawn_blocking(move || write_atomic(to, bytes));
+                     write_futures.push(fut);
++                    }
+                 }
+ 
++                #[cfg(feature = "system")]
++                {
+                 // Await all writes in parallel
+                 for result in futures::future::join_all(write_futures).await {
+                     result.context_ut("failed to export")??;
+                 }
++                }
+ 
+                 OnExportResponse::Paged {
+                     total_pages,
+@@ -670,7 +695,10 @@ fn log_err<T>(artifact: Result<T>) -> Option<T> {
+ fn extra_compile_for_export<D: typst::Document + Send + Sync + 'static>(
+     world: &LspWorld,
+ ) -> Result<Arc<D>> {
++    #[cfg(feature = "system")]
+     let res = tokio::task::block_in_place(|| CompilationTask::<D>::execute(world));
++    #[cfg(not(feature = "system"))]
++    let res = CompilationTask::<D>::execute(world);
+ 
+     match res.output {
+         Ok(v) => Ok(v),
+@@ -697,9 +725,16 @@ impl FutureFolder {
+     where
+         OP: FnOnce(&Scope<'scope>) -> R + Send + 'static,
+     {
++        #[cfg(feature = "system")]
++        {
+         tokio::task::spawn_blocking(move || -> R { rayon::in_place_scope(op) })
+             .await
+             .context_ut("compute error")
++        }
++        #[cfg(not(feature = "system"))]
++        {
++            Ok(rayon::in_place_scope(op))
++        }
+     }
+ 
+     #[must_use]
+@@ -750,7 +785,8 @@ impl FutureFolder {
+ 
+ fn open_external(path: &Path) {
+     #[cfg(not(feature = "open"))]
+-    if open {
++    {
++        let _ = path;
+         log::warn!("open is not supported in this build, ignoring");
+     }
+ 

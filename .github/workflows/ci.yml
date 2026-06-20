@@ -1,0 +1,39 @@
+name: interactive-tutorial::ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Checkout Tinymist web fork
+        run: |
+          git clone --branch tinymist-wasm --depth 1 https://github.com/ParaN3xus/tinymist.git ../../rust/tinymist-wasm
+          git -C ../../rust/tinymist-wasm apply "$GITHUB_WORKSPACE/patches/tinymist-web-export.patch"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.13.1 --locked
+
+      - name: Build Tinymist web package
+        run: npm --prefix ../../rust/tinymist-wasm/crates/tinymist run build
+
+      - run: npm ci
+      - run: npm run assets:fonts
+      - run: npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: interactive-tutorial-dist
+          path: dist

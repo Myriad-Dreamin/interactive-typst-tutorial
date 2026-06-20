@@ -1,0 +1,35 @@
+{
+  "name": "interactive-typst-tutorial",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "assets:fonts": "node scripts/install-fonts.mjs",
+    "dev": "vite --host 0.0.0.0",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && vite build",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16"
+  },
+  "dependencies": {
+    "@fortawesome/fontawesome-svg-core": "^7.2.0",
+    "@fortawesome/free-solid-svg-icons": "^7.2.0",
+    "@gera2ld/tarjs": "^0.3.1",
+    "@myriaddreamin/typst-ts-renderer": "^0.7.0",
+    "@myriaddreamin/typst.ts": "^0.7.0",
+    "@types/pako": "^2.0.4",
+    "buffer": "^6.0.3",
+    "monaco-editor": "^0.53.0",
+    "pako": "^2.1.0",
+    "rxjs": "^7.8.2",
+    "tinymist": "file:../../rust/tinymist-wasm/crates/tinymist/pkg",
+    "tslib": "^2.8.1",
+    "typst-dom": "file:../../rust/tinymist-wasm/tools/typst-dom",
+    "vscode-jsonrpc": "^8.2.1",
+    "vscode-languageclient": "^9.0.1",
+    "vscode-languageserver": "^9.0.1"
+  }
+}

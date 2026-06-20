@@ -1,0 +1,7 @@
+node_modules
+dist
+.vite
+*.local
+.playwright-mcp
+public/assets/fonts/*
+!public/assets/fonts/.gitkeep
