@@ -1,6 +1,0 @@
-#include "table.typ"
-#include "solid-geometry.typ"
-#include "digraph.typ"
-#include "statistics.typ"
-#include "state-machine.typ"
-#include "electronics.typ"

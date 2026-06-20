@@ -1,21 +1,14 @@
-#import "book.typ": chapter, pro-tip, muted
+#import "book.typ": chapter, pro-tip
 
 #show: chapter("Typst 是什么")
 
-#muted[来源：`../tutorial/src/introduction.typ`]
+Typst 是一种用于排版文档的标记语言，也是一套编译器。
 
-原教程先把 Typst 定位为现代排版语言和编译器，并说明本书会用教程、参考、专题三条线补齐中文学习材料。
-
-小节顺序：
-
-- #text("本书定位")
-
+你在 .typ 文件中写下正文、标题、列表、公式和脚本，
+Typst 编译器会把它们转换成 PDF、SVG 或 PNG 等结果。
 
 #pro-tip[
-  整理重点：
-
-  - #text("知道 Typst 同时指语言、编译器和文档生成流程。")
-  - #text("理解交互式教程会把原教程拆成可逐步验证的学习步骤。")
-  - #text("先建立全局地图，再进入标记、脚本、类型和排版细节。")
-
+  可以先把 Typst 理解成更适合出版物和数学公式的 Markdown。
+  当你需要复用样式、自动编号或生成复杂版式时，
+  它又会像一门轻量的编程语言。
 ]

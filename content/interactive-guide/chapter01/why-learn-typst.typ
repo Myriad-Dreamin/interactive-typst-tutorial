@@ -1,20 +1,12 @@
-#import "book.typ": chapter, pro-tip, muted
+#import "book.typ": chapter
 
 #show: chapter("为什么学习 Typst")
 
-#muted[来源：`../tutorial/src/introduction.typ`]
+Typst 的目标是易学、快速、用途广泛。
 
-本节说明 Typst 的易学、快速和用途广泛，尤其适合长文档、报告、数学公式和自动化批量文档。
+- 写普通文章时，它接近 Markdown 的轻量体验。
+- 写论文、讲义和报告时，它原生支持数学公式。
+- 写长文档时，它的编译速度适合频繁预览。
+- 写模板和批量文档时，它可以用脚本组织结构和样式。
 
-小节顺序：
-
-- #text("为什么学习Typst？")
-
-
-#pro-tip[
-  整理重点：
-
-  - #text("把 Typst 与 Markdown、LaTeX 和模板化文档工作流放在同一张能力图里比较。")
-  - #text("明确本教程会从低门槛写作逐渐过渡到脚本和模板。")
-
-]
+因此，本教程会从标记模式开始，再逐步引入脚本能力。
