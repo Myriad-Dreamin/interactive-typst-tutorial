@@ -1,4 +1,4 @@
-import type { Chapter, ChapterCatalogItem } from "./types";
+import type { Chapter, ChapterCatalogItem, TypstSourceFile } from "./types";
 
 type RawModuleLoader = () => Promise<string>;
 
@@ -6,9 +6,11 @@ type InternalChapterCatalogItem = ChapterCatalogItem & {
   sortIndex: number;
 };
 
-type ChapterMetadata = {
+type ParsedChapterMetadata = {
   title: string;
 };
+
+const contentRoot = "../../content/interactive-guide/";
 
 const chapterIndexModules = import.meta.glob<string>(
   "../../content/interactive-guide/chapter*/index.typ",
@@ -18,20 +20,25 @@ const chapterIndexModules = import.meta.glob<string>(
   }
 );
 
-const chapterPageModules = import.meta.glob<string>(
-  [
-    "../../content/interactive-guide/chapter*/*.typ",
-    "!../../content/interactive-guide/chapter*/index.typ",
-    "!../../content/interactive-guide/chapter*/book.typ"
-  ],
+const chapterSourceModules = import.meta.glob<string>(
+  "../../content/interactive-guide/chapter*/**/*.typ",
   {
     query: "?raw",
     import: "default"
   }
 );
 
-const chapterBookModules = import.meta.glob<string>(
+const chapterMetadataModules = import.meta.glob<string>(
   "../../content/interactive-guide/chapter*/book.typ",
+  {
+    query: "?raw",
+    import: "default",
+    eager: true
+  }
+);
+
+const sharedSourceModules = import.meta.glob<string>(
+  "../../content/interactive-guide/shared/**/*.typ",
   {
     query: "?raw",
     import: "default"
@@ -66,11 +73,14 @@ function createChapterCatalogItem(
   const id = getChapterIdFromIndexPath(path);
   const sortIndex = getChapterSortIndex(id);
   const number = getChapterNumber(id);
+  const fallbackTitle = getFallbackChapterTitle(id, number);
+  const metadataPath = `${getDirectoryPath(path)}/book.typ`;
+  const metadataSource = chapterMetadataModules[metadataPath];
 
   return {
     id,
     number,
-    title: getFallbackChapterTitle(id, number),
+    title: metadataSource ? parseChapterMetadata(metadataSource, metadataPath).title : fallbackTitle,
     sortIndex,
     loader: async () => loadChapterFromIndex(await loadIndex(), path)
   };
@@ -80,12 +90,13 @@ async function loadChapterFromIndex(rawIndex: string, indexPath: string): Promis
   const id = getChapterIdFromIndexPath(indexPath);
   const number = getChapterNumber(id);
   const chapterDirectory = getDirectoryPath(indexPath);
-  const metadata = await loadChapterMetadata(chapterDirectory);
+  const fallbackTitle = getFallbackChapterTitle(id, number);
+  const metadata = await loadChapterMetadata(chapterDirectory, fallbackTitle);
   const includes = parseIndexIncludes(rawIndex, indexPath);
   const steps = await Promise.all(
     includes.map(async (includePath) => {
       const pagePath = `${chapterDirectory}/${includePath}`;
-      const loadPage = chapterPageModules[pagePath];
+      const loadPage = chapterSourceModules[pagePath];
 
       if (!loadPage) {
         throw new Error(`Included page not found: ${pagePath}`);
@@ -104,22 +115,27 @@ async function loadChapterFromIndex(rawIndex: string, indexPath: string): Promis
     number,
     title: metadata.title,
     deck: "",
+    sourceFiles: await loadSourceFiles(chapterDirectory),
     steps
   };
 }
 
-async function loadChapterMetadata(chapterDirectory: string): Promise<ChapterMetadata> {
+async function loadChapterMetadata(
+  chapterDirectory: string,
+  fallbackTitle: string
+): Promise<ParsedChapterMetadata> {
   const bookPath = `${chapterDirectory}/book.typ`;
-  const loadBook = chapterBookModules[bookPath];
+  const loadBook = chapterSourceModules[bookPath];
 
   if (!loadBook) {
-    throw new Error(`Chapter metadata file not found: ${bookPath}`);
+    return { title: fallbackTitle };
   }
 
-  return parseChapterMetadata(await loadBook(), bookPath);
+  const metadataSource = await loadBook();
+  return parseChapterMetadata(metadataSource, bookPath);
 }
 
-function parseChapterMetadata(rawBook: string, bookPath: string): ChapterMetadata {
+function parseChapterMetadata(rawBook: string, bookPath: string): ParsedChapterMetadata {
   const metadataDirective = rawBook.match(
     /^#let\s+chapter-info\s*=\s*\([^)]*\btitle:\s*("(?:[^"\\]|\\.)*")[^)]*\)\s*$/m
   );
@@ -177,8 +193,23 @@ function parsePage(rawPage: string, pagePath: string, includePath: string): Chap
   return {
     id: includePath.replace(/\.typ$/u, ""),
     title,
+    sourcePath: toContentSourcePath(pagePath),
     source
   };
+}
+
+async function loadSourceFiles(chapterDirectory: string): Promise<TypstSourceFile[]> {
+  const sourceEntries = [
+    ...Object.entries(sharedSourceModules),
+    ...Object.entries(chapterSourceModules).filter(([path]) => path.startsWith(`${chapterDirectory}/`))
+  ].sort(([left], [right]) => left.localeCompare(right));
+
+  return Promise.all(
+    sourceEntries.map(async ([path, loadSource]) => ({
+      path: toContentSourcePath(path),
+      source: await loadSource()
+    }))
+  );
 }
 
 function parsePageTitle(source: string, pagePath: string): string {
@@ -234,6 +265,14 @@ function parseTypstString(value: string, location: string) {
 
 function getDirectoryPath(path: string) {
   return path.slice(0, path.lastIndexOf("/"));
+}
+
+function toContentSourcePath(path: string) {
+  if (!path.startsWith(contentRoot)) {
+    throw new Error(`Unexpected content source path: ${path}`);
+  }
+
+  return path.slice(contentRoot.length);
 }
 
 function getChapterIdFromIndexPath(path: string) {

@@ -1,8 +1,13 @@
 import "./styles.css";
 import { icon, type IconDefinition } from "@fortawesome/fontawesome-svg-core";
-import { faChevronLeft, faChevronRight, faMoon, faSun } from "@fortawesome/free-solid-svg-icons";
-import { defaultChapterId, loadChapter } from "./chapters";
-import type { Chapter } from "./chapters/types";
+import {
+  faChevronLeft,
+  faChevronRight,
+  faMoon,
+  faSun
+} from "@fortawesome/free-solid-svg-icons";
+import { chapterCatalog, defaultChapterId, loadChapter } from "./chapters";
+import type { Chapter, ChapterCatalogItem } from "./chapters/types";
 import { createSourceEditor, setSourceEditorTheme, type SourceEditor } from "./monaco";
 import { getCurrentTheme, initTheme, toggleTheme } from "./theme";
 import {
@@ -123,7 +128,7 @@ function setStep(stepIndex: number) {
   renderStep();
 }
 
-function formatChapterLabel(chapter: Chapter): string {
+function formatChapterLabel(chapter: Pick<Chapter, "number" | "title">): string {
   return `第${formatChineseNumber(chapter.number)}章 ${chapter.title}`;
 }
 
@@ -168,6 +173,47 @@ function renderFontAwesome(iconDefinition: IconDefinition, className: string) {
   }).html.join("");
 }
 
+function renderChapterSelector(chapter: Chapter): string {
+  return `
+    <span class="breadcrumb-menu">
+      <button
+        class="breadcrumb-item breadcrumb-chapter breadcrumb-menu-button"
+        type="button"
+        data-action="toggle-chapter-menu"
+        aria-haspopup="menu"
+        aria-expanded="false"
+        title="切换章节"
+      >
+        <span class="breadcrumb-separator breadcrumb-menu-separator" aria-hidden="true">
+          ${renderFontAwesome(faChevronRight, "breadcrumb-separator-icon")}
+        </span>
+        <span class="breadcrumb-menu-label">${escapeHtml(formatChapterLabel(chapter))}</span>
+      </button>
+      <span class="chapter-menu" role="menu" hidden>
+        ${chapterCatalog
+          .map((item) => {
+            const selected = item.id === chapter.id;
+
+            return `
+              <button
+                class="chapter-menu-item ${selected ? "is-current" : ""}"
+                type="button"
+                role="menuitemradio"
+                data-action="select-chapter"
+                data-chapter-id="${escapeHtml(item.id)}"
+                aria-checked="${selected}"
+              >
+                <span class="chapter-menu-number">${escapeHtml(`第${formatChineseNumber(item.number)}章`)}</span>
+                <span class="chapter-menu-title">${escapeHtml(item.title)}</span>
+              </button>
+            `;
+          })
+          .join("")}
+      </span>
+    </span>
+  `;
+}
+
 function renderBreadcrumb(): string {
   const chapter = state.chapter;
   const step = chapter?.steps[state.stepIndex];
@@ -178,7 +224,7 @@ function renderBreadcrumb(): string {
       <span class="breadcrumb-item breadcrumb-root">Typst 交互式教程</span>
       ${
         chapter
-          ? `${separator}<span class="breadcrumb-item breadcrumb-chapter">${escapeHtml(formatChapterLabel(chapter))}</span>`
+          ? renderChapterSelector(chapter)
           : ""
       }
       ${step ? `${separator}<span class="breadcrumb-item breadcrumb-step">${escapeHtml(step.title)}</span>` : ""}
@@ -233,6 +279,49 @@ function refreshThemeToggle() {
   }
 }
 
+function closeChapterMenu() {
+  const menu = app.querySelector<HTMLElement>(".chapter-menu");
+  const button = app.querySelector<HTMLButtonElement>("[data-action='toggle-chapter-menu']");
+
+  if (menu) {
+    menu.hidden = true;
+  }
+
+  if (button) {
+    button.setAttribute("aria-expanded", "false");
+  }
+}
+
+function toggleChapterMenu() {
+  const menu = app.querySelector<HTMLElement>(".chapter-menu");
+  const button = app.querySelector<HTMLButtonElement>("[data-action='toggle-chapter-menu']");
+
+  if (!menu || !button) {
+    return;
+  }
+
+  const shouldOpen = menu.hidden;
+
+  menu.hidden = !shouldOpen;
+  button.setAttribute("aria-expanded", String(shouldOpen));
+
+  if (shouldOpen) {
+    const currentItem = menu.querySelector<HTMLElement>(".chapter-menu-item.is-current");
+    currentItem?.scrollIntoView({ block: "nearest" });
+  }
+}
+
+function selectChapter(item: ChapterCatalogItem) {
+  closeChapterMenu();
+
+  if (item.id === state.chapterId) {
+    setStep(0);
+    return;
+  }
+
+  void openChapter(item.id, 0);
+}
+
 function disposeSourceEditor() {
   sourceEditor?.dispose();
   sourceEditor = null;
@@ -280,7 +369,7 @@ function replaceSourceEditorValue(source: string) {
   }
 }
 
-function mountPreviewLayout(source: string) {
+function mountPreviewLayout(chapter: Chapter, step: Chapter["steps"][number]) {
   const previewStage = app.querySelector<HTMLElement>("[data-preview-stage]");
   const runtime = tinymistRuntime;
 
@@ -289,7 +378,17 @@ function mountPreviewLayout(source: string) {
   }
 
   void runtime
-    .mountPreview(previewStage, source, getCurrentTheme())
+    .mountPreview(
+      previewStage,
+      step.source,
+      step.sourcePath,
+      chapter.sourceFiles,
+      {
+        chapterId: chapter.id,
+        chapterTitle: chapter.title
+      },
+      getCurrentTheme()
+    )
     .catch((error: unknown) => {
       console.error("Failed to mount Tinymist preview", error);
     });
@@ -339,7 +438,7 @@ function renderStep() {
 
   updateStepLayout();
   replaceSourceEditorValue(step.source);
-  tinymistRuntime?.replaceSource(step.source);
+  tinymistRuntime?.replaceSource(step.source, step.sourcePath);
 }
 
 function renderBootLoading(progress: BootResourceProgress) {
@@ -460,7 +559,7 @@ function render() {
     </div>
   `;
   mountSourceEditor(step.source);
-  mountPreviewLayout(step.source);
+  mountPreviewLayout(chapter, step);
 }
 
 app.addEventListener("click", (event) => {
@@ -479,10 +578,12 @@ app.addEventListener("click", (event) => {
   }
 
   if (target.dataset.action === "prev") {
+    closeChapterMenu();
     setStep(state.stepIndex - 1);
   }
 
   if (target.dataset.action === "next") {
+    closeChapterMenu();
     setStep(state.stepIndex + 1);
   }
 
@@ -499,6 +600,35 @@ app.addEventListener("click", (event) => {
     setSourceEditorTheme();
     tinymistRuntime?.updateTheme(theme);
     refreshThemeToggle();
+  }
+
+  if (target.dataset.action === "toggle-chapter-menu") {
+    toggleChapterMenu();
+  }
+
+  if (target.dataset.action === "select-chapter") {
+    const chapterId = target.dataset.chapterId;
+    const item = chapterCatalog.find((chapter) => chapter.id === chapterId);
+
+    if (item) {
+      selectChapter(item);
+    }
+  }
+});
+
+document.addEventListener("click", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+
+  if (!target || app.contains(target.closest(".breadcrumb-menu"))) {
+    return;
+  }
+
+  closeChapterMenu();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeChapterMenu();
   }
 });
 

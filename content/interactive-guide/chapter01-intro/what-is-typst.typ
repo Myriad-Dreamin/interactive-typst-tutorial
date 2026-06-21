@@ -1,4 +1,4 @@
-#import "book.typ": chapter, pro-tip
+#import "../shared/book.typ": chapter, pro-tip
 
 #show: chapter("Typst 是什么")
 

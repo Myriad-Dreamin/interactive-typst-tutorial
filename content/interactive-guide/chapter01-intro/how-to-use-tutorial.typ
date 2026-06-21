@@ -1,4 +1,4 @@
-#import "book.typ": chapter
+#import "../shared/book.typ": chapter
 
 #show: chapter("怎么使用本 Tutorial")
 

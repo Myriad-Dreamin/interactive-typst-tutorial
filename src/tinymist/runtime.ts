@@ -1,12 +1,14 @@
 import type { TinymistBootResources } from "./boot-resources";
 import { TinymistLspClient } from "./lsp-client";
 import {
-  buildBookSource,
+  buildTypstInputs,
   buildMainSource,
   measureTypstPage,
+  type TypstInputContext,
   type TutorialTheme,
   type TypstPageParams
 } from "./source";
+import type { TypstSourceFile } from "../chapters/types";
 import { TinymistSvgPreview } from "./svg-preview";
 
 type PreviewMount = {
@@ -21,6 +23,12 @@ export class TinymistTutorialRuntime {
   private preview: TinymistSvgPreview | null = null;
   private mount: PreviewMount | null = null;
   private source = "";
+  private sourcePath = "";
+  private sourceFiles: TypstSourceFile[] = [];
+  private inputContext: TypstInputContext = {
+    chapterId: "",
+    chapterTitle: ""
+  };
   private theme: TutorialTheme = "dark";
   private page: TypstPageParams | null = null;
   private mountToken = 0;
@@ -29,10 +37,20 @@ export class TinymistTutorialRuntime {
 
   constructor(private readonly resources: TinymistBootResources) {}
 
-  async mountPreview(container: HTMLElement, source: string, theme: TutorialTheme) {
+  async mountPreview(
+    container: HTMLElement,
+    source: string,
+    sourcePath: string,
+    sourceFiles: TypstSourceFile[],
+    inputContext: TypstInputContext,
+    theme: TutorialTheme
+  ) {
     const token = this.mountToken + 1;
     this.mountToken = token;
     this.source = source;
+    this.sourcePath = sourcePath;
+    this.sourceFiles = sourceFiles;
+    this.inputContext = inputContext;
     this.theme = theme;
     this.disposePreview();
     this.renderPreviewShell(container, "正在启动 Tinymist Preview");
@@ -53,8 +71,8 @@ export class TinymistTutorialRuntime {
         return;
       }
 
-      await this.syncBook(client);
-      await this.syncMain(client);
+      await this.syncTypstInputs(client);
+      await this.syncSourceFiles(client);
       await this.renderCurrentPreview(token, client, { showStatus: true });
     } catch (error) {
       if (this.mountToken === token) {
@@ -80,8 +98,9 @@ export class TinymistTutorialRuntime {
     }, 120);
   }
 
-  replaceSource(source: string) {
+  replaceSource(source: string, sourcePath: string) {
     this.source = source;
+    this.sourcePath = sourcePath;
 
     if (this.sourceUpdateTimer !== null) {
       window.clearTimeout(this.sourceUpdateTimer);
@@ -142,20 +161,29 @@ export class TinymistTutorialRuntime {
     return client;
   }
 
-  private async syncBook(client = this.lspClient) {
-    if (!client) {
-      return;
-    }
-
-    await client.openOrUpdateBook(buildBookSource(this.theme));
-  }
-
-  private async syncMain(client = this.lspClient) {
+  private async syncSourceFiles(client = this.lspClient) {
     if (!client || !this.page) {
       return;
     }
 
-    await client.openOrUpdateMain(buildMainSource(this.source, this.page, this.theme));
+    await client.syncTypstSources(
+      this.sourceFiles.map((file) =>
+        file.path === this.sourcePath
+          ? {
+              ...file,
+              source: buildMainSource(this.source)
+            }
+          : file
+      )
+    );
+  }
+
+  private async syncTypstInputs(client = this.lspClient) {
+    if (!client || !this.page) {
+      return;
+    }
+
+    await client.updateTypstInputs(buildTypstInputs(this.page, this.theme, this.inputContext));
   }
 
   private async syncAndRender() {
@@ -166,8 +194,8 @@ export class TinymistTutorialRuntime {
       return;
     }
 
-    await this.syncBook(client);
-    await this.syncMain(client);
+    await this.syncTypstInputs(client);
+    await this.syncSourceFiles(client);
     await this.renderCurrentPreview(token, client);
   }
 
@@ -188,7 +216,7 @@ export class TinymistTutorialRuntime {
     }
 
     try {
-      const svgPages = await client.exportSvg();
+      const svgPages = await client.exportSvg(this.sourcePath);
 
       if (this.mountToken !== mountToken || this.renderToken !== renderToken || !this.preview) {
         return;

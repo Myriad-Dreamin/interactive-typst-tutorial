@@ -7,13 +7,11 @@ import {
 } from "vscode-jsonrpc/browser";
 import TinymistWorker from "./ls-worker?worker";
 import {
-  BOOK_PATH,
-  BOOK_URI,
-  MAIN_PATH,
-  MAIN_URI,
+  type TypstInputMap,
   WORKSPACE_PATH,
   WORKSPACE_URI
 } from "./source";
+import type { TypstSourceFile } from "../chapters/types";
 
 type JsonRpcId = number | string | null;
 
@@ -78,6 +76,11 @@ type ExportSvgPagedResponse = {
   }>;
 };
 
+type TinymistConfiguration = {
+  colorTheme: string;
+  typstExtraArgs: string[];
+};
+
 export class TinymistLspClient {
   readonly worker: Worker;
   readonly reader: BrowserMessageReader;
@@ -90,6 +93,12 @@ export class TinymistLspClient {
   private readyPromise: Promise<void> | null = null;
   private readerDisposable: Disposable | null = null;
   private packagePromiseCache = new Map<string, Promise<void>>();
+  private workspaceSourcePaths = new Set<string>();
+  private configuration: TinymistConfiguration = {
+    colorTheme: "dark",
+    typstExtraArgs: []
+  };
+  private typstInputSignature = "";
 
   constructor(
     private readonly fonts: Uint8Array[],
@@ -111,25 +120,54 @@ export class TinymistLspClient {
     return this.readyPromise;
   }
 
-  async openOrUpdateMain(text: string) {
+  async syncTypstSources(sources: TypstSourceFile[]) {
     await this.start();
-    await this.openOrChangeFile(MAIN_PATH, MAIN_URI, text, "typst");
+
+    const nextPaths = new Set(sources.map((source) => sourcePathToWorkspacePath(source.path)));
+
+    for (const path of this.workspaceSourcePaths) {
+      if (!nextPaths.has(path)) {
+        await this.closeAndRemoveFile(path);
+      }
+    }
+
+    for (const source of sources) {
+      const path = sourcePathToWorkspacePath(source.path);
+      await this.openOrChangeFile(path, pathToUri(path), source.source, "typst");
+    }
+
+    this.workspaceSourcePaths = nextPaths;
   }
 
-  async openOrUpdateBook(text: string) {
+  async updateTypstInputs(inputs: TypstInputMap) {
     await this.start();
-    await this.openOrChangeFile(BOOK_PATH, BOOK_URI, text, "typst");
-  }
 
-  async startPreview() {
-    await this.start();
-    await this.sendRequest("workspace/executeCommand", {
-      command: "tinymist.doStartPreview",
-      arguments: [[MAIN_PATH]]
+    const nextSignature = JSON.stringify(inputs);
+
+    if (nextSignature === this.typstInputSignature) {
+      return;
+    }
+
+    this.typstInputSignature = nextSignature;
+    this.configuration = {
+      colorTheme: inputs["interactive-theme"] ?? "dark",
+      typstExtraArgs: typstInputsToExtraArgs(inputs)
+    };
+
+    await this.sendNotification("workspace/didChangeConfiguration", {
+      settings: this.configuration
     });
   }
 
-  async scrollPreview(line: number, character: number) {
+  async startPreview(sourcePath: string) {
+    await this.start();
+    await this.sendRequest("workspace/executeCommand", {
+      command: "tinymist.doStartPreview",
+      arguments: [[sourcePathToWorkspacePath(sourcePath)]]
+    });
+  }
+
+  async scrollPreview(sourcePath: string, line: number, character: number) {
     await this.start();
     await this.sendRequest("workspace/executeCommand", {
       command: "tinymist.scrollPreview",
@@ -137,7 +175,7 @@ export class TinymistLspClient {
         "default_preview",
         {
           event: "panelScrollTo",
-          filepath: MAIN_PATH,
+          filepath: sourcePathToWorkspacePath(sourcePath),
           line,
           character
         }
@@ -145,12 +183,12 @@ export class TinymistLspClient {
     });
   }
 
-  async exportSvg() {
+  async exportSvg(sourcePath: string) {
     await this.start();
     const result = await this.sendRequest("workspace/executeCommand", {
       command: "tinymist.exportSvg",
       arguments: [
-        MAIN_PATH,
+        sourcePathToWorkspacePath(sourcePath),
         {},
         {
           write: false,
@@ -283,6 +321,25 @@ export class TinymistLspClient {
     });
   }
 
+  private async closeAndRemoveFile(path: string) {
+    const existing = this.files.get(path);
+
+    if (!existing) {
+      return;
+    }
+
+    if (existing.opened) {
+      await this.sendNotification("textDocument/didClose", {
+        textDocument: {
+          uri: existing.uri
+        }
+      });
+    }
+
+    this.files.delete(existing.path);
+    this.files.delete(existing.uri);
+  }
+
   private async handleMessage(message: WorkerMessage) {
     if (message.method === "worker") {
       await this.handleWorkerEvent(message);
@@ -361,7 +418,9 @@ export class TinymistLspClient {
   private async resolveClientRequest(method: string, params: unknown) {
     if (method === "workspace/configuration") {
       const items = (params as { items?: unknown[] } | null)?.items ?? [];
-      return items.map(() => null);
+      return items.map((item) =>
+        this.resolveConfigurationItem((item as { section?: unknown } | null)?.section)
+      );
     }
 
     if (method === "workspace/workspaceFolders") {
@@ -411,6 +470,20 @@ export class TinymistLspClient {
       type: "ok",
       content: bytesToBase64(this.textEncoder.encode(file.text))
     };
+  }
+
+  private resolveConfigurationItem(section: unknown) {
+    if (typeof section !== "string") {
+      return null;
+    }
+
+    const key = section.startsWith("tinymist.") ? section.slice("tinymist.".length) : section;
+
+    if (Object.hasOwn(this.configuration, key)) {
+      return this.configuration[key as keyof TinymistConfiguration];
+    }
+
+    return null;
   }
 
   private async resolvePackage(url: string, packageRoot: string) {
@@ -528,6 +601,25 @@ export class TinymistLspClient {
       this.worker.addEventListener("message", onMessage);
     });
   }
+}
+
+function typstInputsToExtraArgs(inputs: TypstInputMap) {
+  return Object.entries(inputs).flatMap(([key, value]) => ["--input", `${key}=${value}`]);
+}
+
+function sourcePathToWorkspacePath(sourcePath: string) {
+  const normalized = sourcePath.replaceAll("\\", "/").replace(/^\/+/u, "");
+
+  if (
+    normalized === "" ||
+    normalized.startsWith("../") ||
+    normalized.includes("/../") ||
+    normalized.endsWith("/..")
+  ) {
+    throw new Error(`Invalid Typst source path: ${sourcePath}`);
+  }
+
+  return `${WORKSPACE_PATH}/${normalized}`;
 }
 
 function isResponse(message: JsonRpcMessage) {

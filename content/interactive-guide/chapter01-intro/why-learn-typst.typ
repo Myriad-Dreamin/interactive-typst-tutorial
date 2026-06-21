@@ -1,4 +1,4 @@
-#import "book.typ": chapter
+#import "../shared/book.typ": chapter
 
 #show: chapter("为什么学习 Typst")
 
