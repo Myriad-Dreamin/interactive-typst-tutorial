@@ -1,5 +1,20 @@
 import { defineConfig, normalizePath, type Plugin } from "vite";
 
+declare const process: {
+  env: {
+    BASE_PATH?: string;
+  };
+};
+
+function normalizeBasePath(basePath: string | undefined): string {
+  if (!basePath) {
+    return "/";
+  }
+
+  const withLeadingSlash = basePath.startsWith("/") ? basePath : `/${basePath}`;
+  return withLeadingSlash.endsWith("/") ? withLeadingSlash : `${withLeadingSlash}/`;
+}
+
 function interactiveGuideContentWatcher(): Plugin {
   return {
     name: "interactive-guide-content-watch",
@@ -49,6 +64,7 @@ function interactiveGuideContentWatcher(): Plugin {
 }
 
 export default defineConfig({
+  base: normalizeBasePath(process.env.BASE_PATH),
   plugins: [interactiveGuideContentWatcher()],
   build: {
     chunkSizeWarningLimit: 3000,
