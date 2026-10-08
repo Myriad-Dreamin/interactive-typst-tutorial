@@ -4,6 +4,8 @@
 
 ## 开发
 
+本仓库的 `package.json` 依赖两条仓外相对路径的本地包：`tinymist`（`file:../../rust/tinymist-wasm/crates/tinymist/pkg`）与 `typst-dom`（`file:../../rust/tinymist-wasm/tools/typst-dom`）。因此 `npm install` 之前，需先把 `tinymist-wasm` 检出到本仓库向上两级目录下的 `rust/tinymist-wasm`（本仓库位于 `<base>/<group>/interactive-typst-tutorial` 时，`tinymist-wasm` 位于 `<base>/rust/tinymist-wasm`），并构建其中 `crates/tinymist/pkg` 与 `tools/typst-dom` 两个包；单独 clone 本仓库后直接 `npm install` 必失败。
+
 ```bash
 npm install
 npm run assets:fonts
